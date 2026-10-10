@@ -1,0 +1,49 @@
+extensions:
+  hangtail:
+    storage_dir: /var/hangtail/segments
+    segment_window: 30s
+    segment_max_age: 2m
+    max_staging_bytes: 536870912  # 512 MiB
+    fsync_interval: 500ms
+    end_marker:
+      attribute: flow.end
+      value: "true"
+    keep_on_error: true
+    untraced: forward
+    tail_addr: "0.0.0.0:4320"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  hangtail:
+    extension: hangtail
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  # Loki via OTLP HTTP (Loki ≥ 3.0 supports native OTLP push)
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [hangtail]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [hangtail, batch]
+      exporters: [otlphttp/loki, debug]
+    traces:
+      receivers: [otlp]
+      processors: [hangtail]
+      exporters: [debug]

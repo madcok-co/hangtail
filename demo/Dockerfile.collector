@@ -1,0 +1,18 @@
+FROM golang:1.26-bookworm AS builder
+
+WORKDIR /workspace
+
+# Copy the full repo so the replace directive in demo/go.mod resolves.
+COPY . .
+
+# Build from the demo sub-module.
+WORKDIR /workspace/demo
+RUN go build -o /tmp/hangtail-collector ./cmd/collector/
+
+# ── Runtime image ─────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=builder /tmp/hangtail-collector /usr/local/bin/hangtail-collector
+EXPOSE 4317 4318 4320
+ENTRYPOINT ["/usr/local/bin/hangtail-collector"]

@@ -1,0 +1,45 @@
+extensions:
+  hangtail:
+    storage_dir: /var/hangtail/segments
+    segment_window: 10s
+    segment_max_age: 30s      # short for demo — see all failures in ~35 seconds
+    fsync_interval: 200ms
+    end_marker:
+      attribute: flow.end
+      value: "true"
+    keep_on_error: true
+    untraced: forward
+    tail_addr: "0.0.0.0:4320"
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  hangtail:
+    extension: hangtail
+
+  batch:
+    timeout: 2s
+
+exporters:
+  # No Loki, no cloud. The debug exporter is the required OTel pipeline placeholder.
+  # All forwarded flows are visible in real time via: hangtail tail --addr localhost:4320
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [hangtail]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [hangtail, batch]
+      exporters: [debug]
+    traces:
+      receivers: [otlp]
+      processors: [hangtail]
+      exporters: [debug]

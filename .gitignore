@@ -1,0 +1,34 @@
+# Binaries
+bin/
+/hangtail
+demo/services/api-go/hangtail-demo-api
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test / coverage
+*.test
+*.out
+*.prof
+
+# Go workspace
+go.work
+go.work.sum
+
+# Vendor
+vendor/
+
+# Private documents
+*.pdf
+*Zone.Identifier
+
+# Asciinema recordings (regenerate with demo/record_*.sh)
+*.cast
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

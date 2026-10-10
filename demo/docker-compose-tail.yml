@@ -1,0 +1,75 @@
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  collector:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile.collector
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./collector/config-tail-only.yaml:/etc/otel/config.yaml:ro
+      - segments:/var/hangtail/segments
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "4320:4320"
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  api:
+    build: ./services/api-go
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=api-go
+      - REDIS_ADDR=redis:6379
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  worker:
+    build: ./services/worker-py
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=worker-py
+      - REDIS_HOST=redis
+      - FAIL_RATE=40
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+
+  notifier:
+    build: ./services/notifier-js
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=notifier-js
+      - REDIS_HOST=redis
+      - FAIL_RATE=15
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  segments:

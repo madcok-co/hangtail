@@ -1,0 +1,24 @@
+dist:
+  name: hangtail-collector
+  description: OpenTelemetry Collector with hangtail processor
+  output_path: /tmp/dist
+  otelcol_version: "0.162.0"
+
+extensions:
+  - gomod: github.com/madcok/hangtail v0.0.0-dev
+    path: ../..
+    import: github.com/madcok/hangtail/extension/hangtailextension
+    name: hangtailextension.NewFactory()
+
+processors:
+  - gomod: github.com/madcok/hangtail v0.0.0-dev
+    path: ../..
+    import: github.com/madcok/hangtail/processor/hangtailprocessor
+    name: hangtailprocessor.NewFactory()
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.162.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.162.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.162.0

@@ -1,0 +1,78 @@
+{
+  "title": "Hangtail — Failed Flows",
+  "uid": "hangtail-demo",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Forwarded log records (only incomplete flows)",
+      "type": "logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "dedupStrategy": "none",
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service_name=~\".+\"}",
+          "refId": "A",
+          "maxLines": 500
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Log volume — forwarded by hangtail",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service_name) (rate({service_name=~\".+\"} [1m]))",
+          "refId": "A",
+          "legendFormat": "{{service_name}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Trace IDs in Loki (should all be failed flows)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "footer": { "enablePagination": true } },
+      "targets": [
+        {
+          "expr": "{service_name=~\".+\"} | logfmt | keep trace_id, service_name, level",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "transformations": [
+        { "id": "groupBy", "options": {
+          "fields": {
+            "trace_id": { "aggregations": ["count"], "operation": "groupby" },
+            "service_name": { "aggregations": [], "operation": "groupby" }
+          }
+        }}
+      ]
+    }
+  ]
+}

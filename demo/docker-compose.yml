@@ -1,0 +1,110 @@
+version: "3.9"
+
+services:
+  # ── Redis (job queue) ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── OTel Collector (with hangtail) ────────────────────────────────────────
+  collector:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile.collector
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./collector/config.yaml:/etc/otel/config.yaml:ro
+      - segments:/var/hangtail/segments
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "4320:4320"   # hangtail tail SSE
+      - "8888:8888"   # Prometheus metrics (internal only, mapped for debug)
+    restart: unless-stopped
+    depends_on:
+      - loki
+
+  # ── Loki ─────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.4.1
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - loki
+
+  # ── API gateway (Go) ──────────────────────────────────────────────────────
+  api:
+    build: ./services/api-go
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=api-go
+      - REDIS_ADDR=redis:6379
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Worker (Python) ───────────────────────────────────────────────────────
+  worker:
+    build: ./services/worker-py
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=worker-py
+      - REDIS_HOST=redis
+      - FAIL_RATE=30
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Notifier (Node.js) ────────────────────────────────────────────────────
+  notifier:
+    build: ./services/notifier-js
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+      - OTEL_SERVICE_NAME=notifier-js
+      - REDIS_HOST=redis
+      - FAIL_RATE=10
+    depends_on:
+      redis:
+        condition: service_healthy
+      collector:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  segments:
+  loki-data:
