@@ -33,8 +33,10 @@ func (s *Set) Add(traceID string, f *os.File) error {
 	s.entries[traceID] = exp
 	s.mu.Unlock()
 	if f != nil {
-		_, err := fmt.Fprintf(f, "%s\n", traceID)
-		return err
+		if _, err := fmt.Fprintf(f, "%s\n", traceID); err != nil {
+			return err
+		}
+		return f.Sync()
 	}
 	return nil
 }
