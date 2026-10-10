@@ -419,6 +419,10 @@ Step-by-step setup for each cloud provider is available in [`docs/cloud-exporter
 - **Elastic** — Native OTLP, no extra exporter needed
 - **Splunk** — HEC Token
 
+## Cost analysis
+
+A worked example with concrete numbers is available in [`docs/cost-analysis.md`](docs/cost-analysis.md): 1M records/s at 5 KB each across AWS, GCP, and Azure — including a side-by-side comparison with storing everything unfiltered.
+
 ---
 
 ## Compatibility
