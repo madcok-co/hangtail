@@ -2,6 +2,7 @@
 bin/
 /hangtail
 demo/services/api-go/hangtail-demo-api
+demo/services/api-plain/hangtail-demo-api-plain
 *.exe
 *.exe~
 *.dll

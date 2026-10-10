@@ -1,0 +1,59 @@
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  api-plain:
+    build: ./services/api-plain
+    environment:
+      - REDIS_ADDR=redis:6379
+      - LOG_FILE=/var/log/app/api.log
+    ports:
+      - "8080:8080"
+    volumes:
+      - applogs:/var/log/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/healthz || exit 1"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  worker-plain:
+    build: ./services/worker-plain
+    environment:
+      - REDIS_HOST=redis
+      - LOG_FILE=/var/log/app/worker.log
+      - FAIL_RATE=40
+    volumes:
+      - applogs:/var/log/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile.collector
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./collector/config-nootel.yaml:/etc/otel/config.yaml:ro
+      - segments:/var/hangtail/segments
+      - applogs:/var/log/app:ro   # read-only — collector only reads logs
+    ports:
+      - "4320:4320"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  segments:
+  applogs:

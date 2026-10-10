@@ -1,0 +1,54 @@
+extensions:
+  hangtail:
+    storage_dir: /var/hangtail/segments
+    segment_window: 10s
+    segment_max_age: 30s      # short for demo
+    fsync_interval: 200ms
+    end_marker:
+      attribute: flow.end
+      value: "true"
+    keep_on_error: true
+    untraced: forward
+    tail_addr: "0.0.0.0:4320"
+
+receivers:
+  filelog:
+    include:
+      - /var/log/app/*.log
+    operators:
+      # Parse each line as JSON; extract timestamp and severity automatically.
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.ts
+          layout: "2006-01-02T15:04:05.000Z07:00"
+          layout_type: gotime
+        severity:
+          parse_from: attributes.level
+      # Promote fields to standard OTel positions.
+      - type: move
+        from: attributes.msg
+        to: body
+      - type: move
+        from: attributes.service
+        to: resource["service.name"]
+
+processors:
+  hangtail:
+    extension: hangtail
+    # Group flows by request_id instead of OTel trace_id.
+    # Works with any plain-JSON log source — no OTel SDK needed.
+    correlation_key: request_id
+  batch:
+    timeout: 2s
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [hangtail]
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [hangtail, batch]
+      exporters: [debug]
