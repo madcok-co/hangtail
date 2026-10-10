@@ -1,7 +1,6 @@
 package bench_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -189,32 +188,57 @@ func BenchmarkConsoleHandler_Direct(b *testing.B) {
 
 // ── full pipeline sim ─────────────────────────────────────────────────────────
 
-// BenchmarkFullPipeline simulates the hot path: marshal → write → scan → unmarshal.
-func BenchmarkFullPipeline(b *testing.B) {
+// BenchmarkIngestPath benchmarks the write side of the pipeline:
+// marshal → channel → segment write. This is the hot path for every incoming batch.
+func BenchmarkIngestPath(b *testing.B) {
 	dir := b.TempDir()
-	cs := completedset.New(time.Hour)
-	_ = cs
-	_ = context.Background()
+	w, _ := segment.NewWriter(filepath.Join(dir, "ingest.seg"), time.Second)
+	b.Cleanup(func() { w.Close() })
 
 	ld := makeLogBatch(50)
+	payload, _ := segment.MarshalLogs(ld)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		path := filepath.Join(dir, "pipe.seg")
-		w, _ := segment.NewWriter(path, time.Second)
-		payload, _ := segment.MarshalLogs(ld)
-		w.Write(segment.SignalLogs, payload)
-		w.Close()
-
-		records, _ := segment.ScanSegment(path)
-		for _, rec := range records {
-			if rec.Signal == segment.SignalLogs {
-				segment.UnmarshalLogs(rec.Payload)
-			}
+		if err := w.Write(segment.SignalLogs, payload); err != nil {
+			b.Fatal(err)
 		}
 	}
 	b.ReportMetric(float64(50*b.N)/b.Elapsed().Seconds(), "records/s")
+}
+
+// BenchmarkReapPath benchmarks the reaper read side: scan + unmarshal a
+// pre-filled segment. A long-lived writer fills the segment once before timing.
+func BenchmarkReapPath(b *testing.B) {
+	dir := b.TempDir()
+	path := filepath.Join(dir, "reap.seg")
+
+	// Pre-fill: 10,000 batches × 50 records = 500,000 records (realistic 1-min segment).
+	w, _ := segment.NewWriter(path, time.Second)
+	ld := makeLogBatch(50)
+	payload, _ := segment.MarshalLogs(ld)
+	for i := 0; i < 10_000; i++ {
+		w.Write(segment.SignalLogs, payload)
+	}
+	w.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		records, err := segment.ScanSegment(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, rec := range records {
+			if rec.Signal == segment.SignalLogs {
+				if _, err := segment.UnmarshalLogs(rec.Payload); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	}
+	b.ReportMetric(float64(10_000*50*b.N)/b.Elapsed().Seconds(), "records/s")
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
