@@ -11,9 +11,9 @@ your services  ──OTLP──►  [hangtail processor]  ──►  Loki / any 
 
 ## Why
 
-Standard OTel pipelines only forward what arrives. If a request fails mid-flight — before your service can log the error — the collector never sees the failure, so nothing reaches your log backend.
+Every service logs everything — but in a multi-service system, most of that is noise from successful flows. When a flow fails, its logs are buried under thousands of success entries. You end up filtering manually, and cross-service correlation is painful.
 
-hangtail flips the default: **keep everything** until a flow explicitly says it succeeded. Flows that never say so are forwarded by the reaper after a configurable timeout.
+hangtail flips the default: **keep everything on disk, forward only the flows that failed**. Successful flows (`flow.end=true`) are discarded before they reach the backend. What arrives in Loki or CloudWatch is already filtered to failures, ready to correlate by `trace_id` or `request_id`.
 
 ---
 
@@ -180,6 +180,15 @@ Each log line must carry the `request_id` (or whichever field you set as `correl
 ```
 
 If `flow.end` never arrives (crash, timeout, error), all log lines for that `request_id` are forwarded to CloudWatch after `segment_max_age`.
+
+---
+
+## Processor config reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `extension` | component ID | `hangtail` | ID of the hangtail extension that owns shared state. |
+| `correlation_key` | string | `""` | Attribute name to use as the flow grouping key instead of the OTel `trace_id`. Set this when using `filelog` or any non-OTel log source. |
 
 ---
 
@@ -357,16 +366,41 @@ make demo-up
 go run ./cmd/hangtail/ tail --addr localhost:4320
 ```
 
-### Demo architecture
+### Demo stacks
+
+Three demo stacks are included under `demo/`:
+
+| Stack | Command | Description |
+|---|---|---|
+| Full (OTel + Loki) | `make demo-up` | api-go + worker-py + notifier-js → Loki → Grafana |
+| Tail-only | `docker compose -f demo/docker-compose-tail.yml up -d` | Same services, no cloud exporter — watch live via `hangtail tail` |
+| Non-OTel | `docker compose -f demo/docker-compose-nootel.yml up -d` | api-plain + worker-plain write JSON to files, no OTel SDK |
+
+**Full demo architecture:**
 
 ```
 ┌─────────────┐  OTLP/HTTP  ┌──────────────────────────┐  OTLP/HTTP  ┌──────┐
 │  api-go     │────────────►│  hangtail-collector       │────────────►│ Loki │
-│  :8080      │             │  :4317 (gRPC)             │             │ :3100│
-│  ~30% fail  │             │  :4318 (HTTP)             │             └──────┘
-└─────────────┘             │  :4320 (tail SSE)         │
+│  worker-py  │             │  :4317 (gRPC)             │             │ :3100│
+│  notifier-js│             │  :4318 (HTTP)             │             └──────┘
+└─────────────┘             │  :4320 (tail SSE)         │  Grafana :3000
                             └──────────────────────────┘
-                                                            Grafana :3000
+```
+
+**Non-OTel demo architecture:**
+
+```
+┌──────────────┐  JSON → file  ┌──────────────────────────┐
+│  api-plain   │──────────────►│  /var/log/app/*.log       │
+│  worker-plain│               └──────────┬───────────────┘
+└──────────────┘                          │ filelog receiver
+                                          ▼
+                               ┌──────────────────────────┐
+                               │  hangtail-collector       │
+                               │  correlation_key:         │
+                               │    request_id             │
+                               │  :4320 (tail SSE)         │
+                               └──────────────────────────┘
 ```
 
 After `make demo-up`, open `http://localhost:3000` and query Loki with `{service_name="api-go"}` — you will only see logs from failed orders.
