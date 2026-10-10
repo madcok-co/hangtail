@@ -130,6 +130,57 @@ service:
 
 > **Important:** `storage_dir` must survive collector restarts. Use a host-mounted volume or a persistent disk — never a tmpfs.
 
+### Without OTel SDK — file-based logs
+
+Services that write plain JSON logs to files (no OTel instrumentation) can use the `filelog` receiver paired with `correlation_key`. No changes to application code required.
+
+```yaml
+extensions:
+  hangtail:
+    storage_dir: /var/hangtail/segments
+    segment_window: 1m
+    segment_max_age: 5m
+    end_marker:
+      attribute: flow.end   # a field in your JSON logs
+      value: "true"
+
+receivers:
+  filelog:
+    include:
+      - /var/log/api/*.log
+      - /var/log/worker/*.log
+    operators:
+      - type: json_parser   # parse each line as JSON
+
+processors:
+  hangtail:
+    extension: hangtail
+    correlation_key: request_id   # group flows by this JSON field instead of trace_id
+
+exporters:
+  awscloudwatchlogs:
+    log_group_name: /app/failed-flows
+    log_stream_name: "{service_name}"
+
+service:
+  extensions: [hangtail]
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [hangtail, batch]
+      exporters: [awscloudwatchlogs]
+```
+
+Each log line must carry the `request_id` (or whichever field you set as `correlation_key`). A successful flow signals completion with `"flow.end": "true"` in the same field namespace:
+
+```json
+{"ts":"2026-10-11T10:00:00Z","level":"INFO","service":"api","request_id":"req-abc","msg":"order received"}
+{"ts":"2026-10-11T10:00:01Z","level":"INFO","service":"worker","request_id":"req-abc","msg":"processing order"}
+{"ts":"2026-10-11T10:00:02Z","level":"INFO","service":"api","request_id":"req-abc","msg":"order completed","flow.end":"true"}
+```
+
+If `flow.end` never arrives (crash, timeout, error), all log lines for that `request_id` are forwarded to CloudWatch after `segment_max_age`.
+
 ---
 
 ## Extension config reference
